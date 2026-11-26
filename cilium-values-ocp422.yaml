@@ -1,0 +1,133 @@
+# Cilium 1.20.5 (open source) on OpenShift 4.22.20 — UPI, air-gapped
+# One values set for every phase: VMs with L2 announcements first, bare metal with BGP later.
+# BGP is enabled from day 0 but does nothing until a CiliumBGPClusterConfig selects nodes.
+# Leave it in place; don't toggle it per phase.
+#
+# Placeholders (render-cilium-manifests.sh replaces them):
+#   REGISTRY      mirror prefix that holds cilium/* (e.g. registry.lab.local:8443/mirror)
+#   API_INT_HOST  api-int.<cluster>.<baseDomain>
+# Must match install-config: clusterNetwork 10.128.0.0/14, hostPrefix 23 (change both places together).
+
+# ---------- OpenShift integration ----------
+cni:
+  binPath: /var/lib/cni/bin              # where Multus looks for CNI binaries on RHCOS
+  confPath: /var/run/multus/cni/net.d    # Multus reads the default network from here
+  exclusive: false                       # never touch other CNI configs (Multus)
+securityContext:
+  privileged: true                       # namespace is run-level 0, so SCC admission is skipped
+
+ipam:
+  mode: cluster-pool
+  operator:
+    clusterPoolIPv4PodCIDRList: ["10.128.0.0/14"]
+    clusterPoolIPv4MaskSize: 23
+
+# ---------- Datapath ----------
+kubeProxyReplacement: true               # required for L2 announcements; CNO kube-proxy is disabled
+k8sServiceHost: API_INT_HOST
+k8sServicePort: 6443
+routingMode: tunnel
+tunnelProtocol: vxlan                    # UDP 8472 must be open between the VM and bare-metal segments
+MTU: 1500                                # LOWEST underlay MTU across the VM and bare-metal segments (Cilium subtracts VXLAN overhead)
+
+# ---------- LoadBalancer: L2 (phase 2) + BGP (phase 3) ----------
+l2announcements:
+  enabled: true
+bgpControlPlane:
+  enabled: true
+k8sClientRateLimit:                      # L2 uses one lease per announced Service
+  qps: 30
+  burst: 60
+
+# ---------- Observability ----------
+hubble:
+  enabled: true
+  tls:
+    auto:
+      enabled: true
+      method: helm                       # certs generated at `helm template` time
+  relay:
+    enabled: true
+    image:
+      repository: REGISTRY/cilium/hubble-relay
+      tag: v1.20.5
+      useDigest: false
+  ui:
+    enabled: true
+    backend:
+      image:
+        repository: REGISTRY/cilium/hubble-ui-backend
+        tag: v0.13.6
+        useDigest: false
+    frontend:
+      image:
+        repository: REGISTRY/cilium/hubble-ui
+        tag: v0.13.6
+        useDigest: false
+
+# ---------- Images: every chart image points at the mirror (tag pulls, no ITMS/IDMS needed) ----------
+image:
+  repository: REGISTRY/cilium/cilium
+  tag: v1.20.5
+  useDigest: false
+operator:
+  replicas: 2
+  image:
+    repository: REGISTRY/cilium/operator   # chart adds "-generic"
+    tag: v1.20.5
+    useDigest: false
+envoy:
+  image:
+    repository: REGISTRY/cilium/cilium-envoy
+    tag: v1.39.6-1794557904-dee711ff0e84b106edd0abcdd71961af1b870359
+    useDigest: false
+certgen:
+  image:
+    repository: REGISTRY/cilium/certgen
+    tag: v0.4.14
+    useDigest: false
+preflight:
+  image:
+    repository: REGISTRY/cilium/cilium
+    tag: v1.20.5
+    useDigest: false
+  envoy:
+    image:
+      repository: REGISTRY/cilium/cilium-envoy
+      tag: v1.39.6-1794557904-dee711ff0e84b106edd0abcdd71961af1b870359
+      useDigest: false
+clustermesh:
+  apiserver:
+    image:
+      repository: REGISTRY/cilium/clustermesh-apiserver
+      tag: v1.20.5
+      useDigest: false
+nodeinit:
+  image:
+    repository: REGISTRY/cilium/startup-script
+    tag: 1782916218-36ae25f
+    useDigest: false
+authentication:
+  mutual:
+    spire:
+      install:
+        initImage:
+          repository: REGISTRY/library/busybox
+          tag: 1.38.0
+          useDigest: false
+        agent:
+          image:
+            repository: REGISTRY/spiffe/spire-agent
+            tag: 1.15.5
+            useDigest: false
+        server:
+          image:
+            repository: REGISTRY/spiffe/spire-server
+            tag: 1.15.5
+            useDigest: false
+encryption:
+  ztunnel:
+    image:
+      repository: REGISTRY/cilium/ztunnel
+      tag: v1.0.0
+      useDigest: false

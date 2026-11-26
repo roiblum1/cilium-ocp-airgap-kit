@@ -1,0 +1,43 @@
+# oc-mirror v2 ImageSetConfiguration — open-source Cilium 1.20.5 + cilium-cli v0.20.3 test images
+# Target: OpenShift 4.22.20 UPI (9 VMs) + bare metal added later with `oc adm node-image create`
+#
+# Image list taken from the 1.20.5 Helm chart values.yaml and cilium-cli v0.20.3 defaults.
+# The OpenShift 4.22.20 release payload is NOT in this file — you mirror it as usual
+# (node-image create only needs images from that payload).
+#
+#   connected:     oc mirror -c imageset-cilium-1.20.5.yaml file://cilium-mirror --v2
+#   disconnected:  oc mirror -c imageset-cilium-1.20.5.yaml --from file://cilium-mirror docker://<REGISTRY> --v2
+#
+# Images land at <REGISTRY>/cilium/..., <REGISTRY>/frrouting/frr, etc. (upstream path kept).
+# The values file points every chart image at <REGISTRY>, so no ITMS/IDMS is needed for Cilium.
+# The digests in the comments are the ones pinned by the chart/CLI. Check them with: skopeo inspect --raw | sha256sum
+kind: ImageSetConfiguration
+apiVersion: mirror.openshift.io/v2alpha1
+mirror:
+  additionalImages:
+  # ---- Phase 1/2: Cilium core (enabled by the values file) ----
+  - name: quay.io/cilium/cilium:v1.20.5                       # agent DaemonSet (also preflight)
+  - name: quay.io/cilium/operator-generic:v1.20.5             # chart builds "operator" + "-generic"
+  - name: quay.io/cilium/cilium-envoy:v1.39.6-1794557904-dee711ff0e84b106edd0abcdd71961af1b870359  # sha256:bdef13043ebaa7b9dcd8e3a86be41080bb5369e017cd759a12daf89e2b8fafe7
+  - name: quay.io/cilium/hubble-relay:v1.20.5
+  - name: quay.io/cilium/hubble-ui:v0.13.6                    # sha256:049a80a03585c043d0c3121bdc518c72b0fd42bae07e4bcce0fdb8f1e88041d0
+  - name: quay.io/cilium/hubble-ui-backend:v0.13.6            # sha256:83b3fc763f3d49948c306bf49b08277383e195904b9ca5c0c0022b2112628787
+  - name: quay.io/cilium/certgen:v0.4.14                      # sha256:2f89929b7474b739d5225d69f44bd70d9e28067ff6dc7fdbe0f6407828fb8395
+
+  # ---- Rest of the 1.20.5 chart (mirrored so the full chart works offline; not enabled) ----
+  - name: quay.io/cilium/clustermesh-apiserver:v1.20.5
+  - name: quay.io/cilium/startup-script:1782916218-36ae25f    # nodeinit; sha256:f99e2beda7324e93ba04d6240d9626a6b9ab023d7d56e3b029d3d9c823ce63ef
+  - name: quay.io/cilium/ztunnel:v1.0.0                       # sha256:884de5adde400e39f58e36c7a729f7690466ca4a8eb4c2a8daa9c1c025115b24
+  - name: ghcr.io/spiffe/spire-agent:1.15.5                   # sha256:3652c732b0f0d36f4dd78394230a1b1cd0ddcc29548a46c67a996b1a78c14481
+  - name: ghcr.io/spiffe/spire-server:1.15.5                  # sha256:584a9c5cc95b9457f5033e7e4488d603fffe5ec48a80c4dba14b05c5e1c2c384
+  - name: docker.io/library/busybox:1.38.0                    # spire init; sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
+
+  # ---- Phase 2/3: `cilium connectivity test` (cilium-cli v0.20.3 defaults) ----
+  - name: quay.io/cilium/alpine-curl:v1.10.0                  # --curl-image; sha256:913e8c9f3d960dde03882defa0edd3a919d529c2eb167caa7f54194528bde364
+  - name: quay.io/cilium/json-mock:v1.4.1                     # --json-mock-image (also the LB test backend); sha256:6a66df90808a39c02e7a9d58af7bf0e54d8f8b7d4bc528f48c891969a7049195
+  - name: registry.k8s.io/coredns/coredns:v1.15.0             # --dns-test-server-image; sha256:0a9d8c8ddf34347eb59aad9a8784f0710de88d6d112726d11d271f9bc6daca26
+  - name: quay.io/cilium/test-connection-disruption:v0.0.18   # --test-conn-disrupt-image; sha256:1666bbed3eb6f0e3074b366fbf701a5ea7206a946fa2a9fd4efff738bae2d1f9
+  - name: quay.io/frrouting/frr:10.7.1                        # --frr-image (BGP tests + lab BGP peer); sha256:e995beaa50fdc9edb35eadcfefa29b7f062cc06f2b812613789b68fa541554d2
+  - name: docker.io/alpine/socat:1.8.1.3                      # --socat-image; sha256:e8a6e8868a8e6e01d9c2c321a8f8d4474d2d741d962462e5c5a124a8e66a0055
+  - name: gcr.io/k8s-staging-gateway-api/echo-advanced:v20251204-v1.4.1   # --echo-image (optional tests)
+  - name: quay.io/cilium/network-perf:3.22-1793546159-db4fb5f # --performance-image; sha256:064597d7836703ae0b5c948ad4c311e12022a7be8398e5eedd724568440aff4c

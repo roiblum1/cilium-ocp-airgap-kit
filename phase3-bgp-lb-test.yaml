@@ -1,0 +1,86 @@
+# Phase 3 — bare-metal workers (added with `oc adm node-image create`) advertise LoadBalancer IPs over BGP
+#
+#   oc label node <bm-1> <bm-2> ... lab.cilium.io/lb=bgp
+#   sed 's#REGISTRY#registry.lab.local:8443/mirror#' phase3-bgp-lb-test.yaml | oc apply -f -   # after phase 2 (reuses lb-test/echo)
+#   cilium bgp peers -n cilium                  # session Established per bare-metal node
+#   cilium bgp routes advertised ipv4 unicast -n cilium
+#   oc -n lb-test get svc echo-bgp              # EXTERNAL-IP from lab-bgp-pool
+#   on the ToR/peer: one /32 per VIP with every BM node as an ECMP next hop
+#   curl http://<EXTERNAL-IP>/ from a routed client
+#
+# ToR side: one neighbor per bare-metal node IP (or a dynamic listen range) with remote-as = localASN below.
+# No ToR in the lab? Run FRR on the bastion as the peer:
+#   podman run -d --name frr --net host --privileged -v ./frr:/etc/frr:Z quay.io/frrouting/frr:10.7.1  (from your mirror)
+#
+# Edit before applying: ASNs, peerAddress, and a routed pool CIDR that is NOT on any L2 segment.
+---
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: lab-bgp-pool
+spec:
+  blocks:
+  - cidr: 10.99.0.0/27          # <-- routed VIP range, not on any L2 segment
+  serviceSelector:
+    matchLabels: {lb.cilium.io/mode: bgp}
+---
+apiVersion: cilium.io/v2
+kind: CiliumBGPClusterConfig
+metadata:
+  name: lab-bgp
+spec:
+  nodeSelector:
+    matchLabels: {lab.cilium.io/lb: bgp}   # only the bare-metal nodes speak BGP
+  bgpInstances:
+  - name: tor
+    localASN: 65010             # <-- cluster ASN
+    peers:
+    - name: tor-a
+      peerASN: 65000            # <-- ToR / FRR ASN
+      peerAddress: 10.20.0.1    # <-- ToR / FRR IP reachable from the BM nodes
+      peerConfigRef:
+        name: lab-bgp-peer
+---
+apiVersion: cilium.io/v2
+kind: CiliumBGPPeerConfig
+metadata:
+  name: lab-bgp-peer
+spec:
+  timers:
+    holdTimeSeconds: 9
+    keepAliveTimeSeconds: 3
+  gracefulRestart:
+    enabled: true
+    restartTimeSeconds: 15
+  families:
+  - afi: ipv4
+    safi: unicast
+    advertisements:
+      matchLabels: {advertise: lab-bgp}
+---
+apiVersion: cilium.io/v2
+kind: CiliumBGPAdvertisement
+metadata:
+  name: lab-bgp-lb
+  labels: {advertise: lab-bgp}
+spec:
+  advertisements:
+  - advertisementType: Service
+    service:
+      addresses: [LoadBalancerIP]
+    selector:
+      matchLabels: {lb.cilium.io/mode: bgp}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-bgp
+  namespace: lb-test
+  labels: {lb.cilium.io/mode: bgp}
+spec:
+  type: LoadBalancer
+  loadBalancerClass: io.cilium/bgp-control-plane
+  externalTrafficPolicy: Cluster
+  selector: {app: echo}
+  ports:
+  - {name: http, port: 80, targetPort: 8080}

@@ -1,0 +1,92 @@
+# Phase 2 — LoadBalancer Service with no BGP (L2 announcements / ARP) on the VM workers
+#
+#   oc label node <vm-worker-1> <vm-worker-2> ... lab.cilium.io/lb=l2
+#   sed 's#REGISTRY#registry.lab.local:8443/mirror#' phase2-l2-lb-test.yaml | oc apply -f -
+#   oc -n lb-test get svc echo-l2 -w            # EXTERNAL-IP comes from lab-l2-pool
+#   oc -n cilium get leases | grep l2announce  # which node answers ARP for the VIP
+#   curl http://<EXTERNAL-IP>/                 # from a host on the same L2 segment and from a routed host
+#   arping -I <if> <EXTERNAL-IP>                # MAC should be the elected node's NIC
+#   Failover: drain/poweroff the lease holder; the VIP must move within ~15s (leaseDuration)
+#
+# Edit before applying: the pool range must be FREE IPs on the VM machine network (outside DHCP).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lb-test
+---
+# json-mock (already mirrored for the connectivity test) is the HTTP backend; it may need root
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: echo-anyuid
+  namespace: lb-test
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: lb-test
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo
+  namespace: lb-test
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: echo}
+  template:
+    metadata:
+      labels: {app: echo}
+    spec:
+      containers:
+      - name: echo
+        image: REGISTRY/cilium/json-mock:v1.4.1
+        env:
+        - {name: PORT, value: "8080"}
+        ports:
+        - {containerPort: 8080, name: http}
+        readinessProbe:
+          httpGet: {path: /, port: 8080}
+---
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: lab-l2-pool
+spec:
+  blocks:
+  - start: 10.10.50.200      # <-- free IPs on the VM machine network
+    stop: 10.10.50.220
+  serviceSelector:
+    matchLabels: {lb.cilium.io/mode: l2}
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: lab-l2
+spec:
+  serviceSelector:
+    matchLabels: {lb.cilium.io/mode: l2}
+  nodeSelector:
+    matchLabels: {lab.cilium.io/lb: l2}
+  # interfaces: ["^ens.*"]   # omit = all devices Cilium manages
+  loadBalancerIPs: true
+  externalIPs: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-l2
+  namespace: lb-test
+  labels: {lb.cilium.io/mode: l2}
+spec:
+  type: LoadBalancer
+  loadBalancerClass: io.cilium/l2-announcer   # explicit class: no clash if AKO ever runs here too
+  externalTrafficPolicy: Cluster              # L2 announcements do not support Local
+  selector: {app: echo}
+  ports:
+  - {name: http, port: 80, targetPort: 8080}

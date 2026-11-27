@@ -8,6 +8,7 @@
 | `render-cilium-manifests.sh` | bastion | Writes the CNO/kube-proxy override, the namespace and the rendered Cilium objects into `manifests/` |
 | `phase2-l2-lb-test.yaml` | cluster | IP pool + L2 policy + LoadBalancer Service, no BGP (VM workers) |
 | `phase3-bgp-lb-test.yaml` | cluster | BGP cluster config, peer config, advertisement + LoadBalancer Service (bare-metal workers) |
+| `docs/cilium-1.20.5/` | anywhere | Offline copy of the upstream Cilium 1.20.5 documentation sources; see `docs/README.md` |
 
 Open-source Cilium has no maintained OpenShift packaging past 1.15 (`isovalent/olm-for-cilium` stops at 1.15.1). This kit renders the upstream chart as day-0 manifests, the way that OLM package did. Neither Red Hat nor Isovalent supports this setup.
 
